@@ -1,0 +1,1 @@
+lynk do worda ze spisem naszych znakow: https://pgedupl-my.sharepoint.com/:w:/r/personal/s193200_student_pg_edu_pl/Documents/own_data_collected.docx?d=w82cbdd4a18154d7d9d201171715e661e&csf=1&web=1&e=t8k1YJ
