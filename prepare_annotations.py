@@ -34,6 +34,6 @@ df = df[['FilePath', 'ClassId', 'SignName']]
 # save
 df.to_csv('annotations.csv', index=False)
 
-print(f"✅ annotations.csv created! Total samples: {len(df)}")
+print(f"annotations.csv created! Total samples: {len(df)}")
 print("Example rows:")
 print(df.head())
