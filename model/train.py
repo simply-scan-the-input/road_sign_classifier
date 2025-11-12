@@ -8,6 +8,8 @@ Training script with:
 - --overfit-batch N mode for sanity check
 """
 import argparse
+import matplotlib.pyplot as plt
+import pandas as pd
 import os
 import yaml
 import json
@@ -141,12 +143,27 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    # merge CLI args into cfg for record
     cfg['_cli'] = vars(args)
     workdir = Path(args.workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
+
+    import shutil
+    if workdir.exists():
+        print(f"Cleaning previous results in: {workdir}")
+        for item in workdir.iterdir():
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            except Exception as e:
+                print(f"Could not remove {item}: {e}")
+    else:
+        workdir.mkdir(parents=True, exist_ok=True)
+
+    # recreate needed subfolders
     (workdir / 'checkpoints').mkdir(exist_ok=True)
     (workdir / 'tb').mkdir(exist_ok=True)
+
     cfg_path = workdir / 'used_config.yaml'
     save_yaml(cfg, cfg_path)
 
@@ -174,8 +191,8 @@ def main():
 
     # Dataset - expects folder structured like ImageFolder (train/val). Replace with your dataset if needed.
     data_root = Path(cfg['data_root'])
-    train_folder = data_root / 'train'
-    val_folder = data_root / 'val'
+    train_folder = data_root / 'train' / 'GTSRB'
+    val_folder = data_root / 'val' / 'GTSRB'
 
     if args.overfit_batch > 0:
         # Build small dataset from train; will use a single batch repeatedly
@@ -183,6 +200,20 @@ def main():
         if len(ds) == 0:
             raise RuntimeError('Train folder empty; cannot overfit.')
         loader_tmp = DataLoader(ds, batch_size=args.overfit_batch, shuffle=True, num_workers=2)
+        # debug: inspect dataset and one batch
+        ds = ImageFolder(train_folder, transform=train_tf)
+        print("Original ds len:", len(ds))
+        # count images per class (first 20 classes)
+        from collections import Counter
+        labels = [y for _, y in ds.samples]
+        print("Label counts (sample):", Counter(labels))
+        loader_tmp = DataLoader(ds, batch_size=args.overfit_batch, shuffle=True, num_workers=0)
+        batch_imgs, batch_targets = next(iter(loader_tmp))
+        print("batch_imgs.shape:", batch_imgs.shape)   # expect [B,3,H,W]
+        print("batch_targets.shape:", batch_targets.shape)
+        print("unique labels in batch:", batch_targets.unique().tolist())
+        print("batch_targets:", batch_targets.tolist())
+
         batch_imgs, batch_targets = next(iter(loader_tmp))
         # make tiny dataset whose __len__ is 1 but DataLoader returns our batch repeatedly
         class SingleBatchDataset(Dataset):
@@ -192,8 +223,8 @@ def main():
                 return batch_imgs, batch_targets
         train_ds = SingleBatchDataset()
         val_ds = SingleBatchDataset()
-        train_loader = DataLoader(train_ds, batch_size=1, shuffle=True)
-        val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
+        train_loader = DataLoader(train_ds, batch_size=None, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=None, shuffle=False)
     else:
         train_ds = ImageFolder(train_folder, transform=train_tf)
         val_ds = ImageFolder(val_folder, transform=val_tf)
@@ -209,13 +240,34 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=cfg.get('lr', 1e-3), weight_decay=cfg.get('weight_decay',1e-6))
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=cfg.get('lr_step',10), gamma=cfg.get('lr_gamma',0.1))
 
+    # --------------------------------------------------
+    # 🔹 PATCH: Overfit (sanity check) mode adjustments
+    # --------------------------------------------------
+    if args.overfit_batch > 0:
+        print(">>> Overfit mode detected: applying overfit-friendly hyperparams")
+        for g in optimizer.param_groups:
+            g['weight_decay'] = 0.0       # no regularization
+            g['lr'] = 1e-2                # stronger learning rate
+        for m in model.modules():
+            if isinstance(m, torch.nn.Dropout):
+                m.p = 0.0                 # disable dropout
+        scheduler = None                  # disable LR scheduler
+        epochs = 200                      # train longer
+    # --------------------------------------------------
+
     # CSV logger
     csv_logger = CSVLogger(str(workdir / 'train_log.csv'),
                            ['epoch','train_loss','train_acc','val_loss','val_acc','lr','time'])
 
     best_val_loss = float('inf')
     start_time = time.time()
-    epochs = cfg.get('epochs', 30 if args.overfit_batch==0 else 50)
+
+    # jeśli nie overfit, to bierz z config.yaml, inaczej z patcha
+    if args.overfit_batch > 0:
+        epochs = 200   # sanity test — dłuższy, żeby dobrze zapamiętać batch
+    else:
+        epochs = cfg.get('epochs', 30)
+
     for epoch in range(1, epochs+1):
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
         val_loss, val_acc = eval_one_epoch(model, val_loader, criterion, device)
@@ -260,11 +312,8 @@ def main():
             torch.save(ckpt, best_name)
             print(f"Saved best checkpoint {best_name}")
 
-        scheduler.step()
-
-        # early stop quick for overfit mode
-        if args.overfit_batch > 0 and epoch >= 20:
-            break
+        if scheduler is not None:
+          scheduler.step()
 
     csv_logger.close()
     tb_writer.close()
@@ -275,7 +324,60 @@ def main():
         'total_time_s': time.time() - start_time
     }
     save_json(summary, workdir / 'summary.json')
+
+    # Plotting training curves
+    plot_dir = workdir / 'plots'
+    plot_training_curves(str(workdir / 'train_log.csv'), str(plot_dir))
+
     print("Training finished. Summary saved to", workdir / 'summary.json')
+
+def plot_training_curves(csv_path, save_dir):
+    """
+    Reads the training CSV log and plots loss/accuracy curves.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    df = pd.read_csv(csv_path)
+    
+    # Plot 1: Loss
+    plt.figure(figsize=(8,5))
+    plt.plot(df['epoch'], df['train_loss'], label='Train Loss', marker='o')
+    plt.plot(df['epoch'], df['val_loss'], label='Val Loss', marker='o')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'loss_curves.png'))
+    plt.close()
+
+    # Plot 2: Accuracy
+    plt.figure(figsize=(8,5))
+    plt.plot(df['epoch'], df['train_acc'], label='Train Acc', marker='o')
+    plt.plot(df['epoch'], df['val_acc'], label='Val Acc', marker='o')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training and Validation Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'acc_curves.png'))
+    plt.close()
+
+    # Plot 3: Learning Rate
+    plt.figure(figsize=(8,5))
+    plt.plot(df['epoch'], df['lr'], label='Learning Rate', marker='o', color='orange')
+    plt.xlabel('Epoch')
+    plt.ylabel('LR')
+    plt.title('Learning Rate Schedule')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'lr_curve.png'))
+    plt.close()
+
+    print(f"Saved training plots to: {save_dir}")
+
 
 if __name__ == '__main__':
     main()
