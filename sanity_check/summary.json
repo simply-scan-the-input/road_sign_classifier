@@ -1,16 +1,5 @@
 {
-  "final_epoch": 20,
-  "best_epoch": 20,
-  "best_val_loss": Infinity,
-  "best_val_acc": 0.140625,
-  "train_loss_at_best": 2.3002376556396484,
-  "train_acc_at_best": 0.34375,
-  "total_time_s": 1.969242811203003,
-  "hparams": {
-    "lr": 0.001,
-    "batch_size": 32,
-    "weight_decay": 1e-06,
-    "img_size": 64,
-    "epochs": 30
-  }
+  "best_val_acc": 0.375,
+  "epochs_run": 20,
+  "total_time_s": 1.29
 }
