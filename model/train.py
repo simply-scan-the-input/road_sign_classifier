@@ -1,12 +1,3 @@
-# train.py
-"""
-Training script with:
-- config YAML or CLI
-- TensorBoard logging (persistent to disk)
-- CSV logging of epoch metrics
-- checkpointing (periodic + best)
-- --overfit-batch N mode for sanity check
-"""
 import argparse
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -27,49 +18,45 @@ from torchvision.datasets import ImageFolder
 from torch.utils.tensorboard import SummaryWriter
 import csv
 
-# ---------------------------
 # Utilities
-# ---------------------------
-def set_seed(seed=42):
+def set_seed(seed=42): #ustawianie ziarna losowści
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-def save_yaml(obj, path):
+def save_yaml(obj, path): #zapisywanie do pliku Yaml
     with open(path, 'w') as f:
         yaml.safe_dump(obj, f, sort_keys=False)
 
-def save_json(obj, path):
+def save_json(obj, path): #zapisywanie obiektu do JSON
     with open(path, 'w') as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
 
-# ---------------------------
-# Simple CNN model (example)
-# ---------------------------
 class SimpleTrafficCNN(nn.Module):
     def __init__(self, num_classes=43):
         super().__init__()
         self.features = nn.Sequential(
+        # konwolucja 3 kanały->32 filtry, kernel 3x3,normalizacja, nieliniowość, pooling 2x2
             nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(), nn.MaxPool2d(2),
+            #64 i 128 kanały
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(), nn.MaxPool2d(2),   
             nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(), nn.MaxPool2d(2),
             nn.AdaptiveAvgPool2d((1,1))
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
+            #warstwa gęsta, nielinowość, dropout 40%
             nn.Linear(128, 256), nn.ReLU(), nn.Dropout(0.4),
             nn.Linear(256, num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x): #przepływ danych
         x = self.features(x)
         x = self.classifier(x)
         return x
 
-# ---------------------------
-# Training / Eval helpers
-# ---------------------------
+#trenowanie jednej epoki
 def train_one_epoch(model, loader, optimizer, criterion, device):
     model.train()
     running_loss = 0.0
@@ -88,6 +75,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device):
         total += imgs.size(0)
     return running_loss / total, correct / total
 
+#ocena jednej epoki
 def eval_one_epoch(model, loader, criterion, device):
     model.eval()
     running_loss = 0.0
@@ -104,9 +92,7 @@ def eval_one_epoch(model, loader, criterion, device):
             total += imgs.size(0)
     return running_loss / total, correct / total
 
-# ---------------------------
-# CSV logger
-# ---------------------------
+#logowanie wyników do pliku
 class CSVLogger:
     def __init__(self, path, fieldnames):
         self.path = path
@@ -116,30 +102,32 @@ class CSVLogger:
         self.writer = csv.DictWriter(self.f, fieldnames=fieldnames)
         if first:
             self.writer.writeheader()
-
+    #dopisywanie jednego wiersza, po tym flush
     def log(self, row: dict):
         self.writer.writerow(row)
         self.f.flush()
-
+    #zamkniecie pliku
     def close(self):
         self.f.close()
 
-# ---------------------------
-# Main
-# ---------------------------
+#argumenty
 def parse_args():
     parser = argparse.ArgumentParser()
+    #ścieżka do pliku Yaml
     parser.add_argument('--config', type=str, default='config.yaml', help='path to config yaml')
+    #miejsce zapisu wyniku treningu
     parser.add_argument('--workdir', type=str, default='workdir', help='output folder for logs/checkpoints')
+    #sanity check
     parser.add_argument('--overfit-batch', type=int, default=0, help='if >0 use single batch of given size for both train and val (sanity)')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    #jakbyśmy chcieli więcej klas
     parser.add_argument('--num-classes', type=int, default=43)
     return parser.parse_args()
 
 def main():
     args = parse_args()
     set_seed(42)
-    # load config
+    #ładowanie configu
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
@@ -160,62 +148,60 @@ def main():
     else:
         workdir.mkdir(parents=True, exist_ok=True)
 
-    # recreate needed subfolders
+    #tworzenie folderów
     (workdir / 'checkpoints').mkdir(exist_ok=True)
     (workdir / 'tb').mkdir(exist_ok=True)
-
+    #zapisuje konfig
     cfg_path = workdir / 'used_config.yaml'
     save_yaml(cfg, cfg_path)
 
-    # save hyperparams to json for easy inspection
+    #zapisywanie do jsona
     save_json(cfg, workdir / 'hyperparams.json')
 
-    # TensorBoard writer (persistent to disk)
+    #writer logów
     tb_writer = SummaryWriter(log_dir=str(workdir / 'tb'))
 
-    # Device
     device = torch.device(args.device)
 
-    # Data transforms (basic)
+    #transformacje danych
     img_size = cfg.get('img_size', 64)
-    train_tf = transforms.Compose([
+    train_tf = transforms.Compose([ #transform do treningu
         transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomResizedCrop((img_size, img_size), scale=(0.8,1.0)),
         transforms.ToTensor(),
     ])
-    val_tf = transforms.Compose([
+    val_tf = transforms.Compose([ #transform do walidacji
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
     ])
 
-    # Dataset - expects folder structured like ImageFolder (train/val). Replace with your dataset if needed.
     data_root = Path(cfg['data_root'])
     train_folder = data_root / 'train' / 'GTSRB'
     val_folder = data_root / 'val' / 'GTSRB'
 
-    if args.overfit_batch > 0:
-        # Build small dataset from train; will use a single batch repeatedly
+    if args.overfit_batch > 0: #jeżeli overfit batch(tryb sanity)
+        #do każdej epoki ta sama próbka danych by przeuczyć model
         ds = ImageFolder(train_folder, transform=train_tf)
         if len(ds) == 0:
             raise RuntimeError('Train folder empty; cannot overfit.')
         loader_tmp = DataLoader(ds, batch_size=args.overfit_batch, shuffle=True, num_workers=2)
-        # debug: inspect dataset and one batch
         ds = ImageFolder(train_folder, transform=train_tf)
         print("Original ds len:", len(ds))
-        # count images per class (first 20 classes)
+
         from collections import Counter
         labels = [y for _, y in ds.samples]
         print("Label counts (sample):", Counter(labels))
+
         loader_tmp = DataLoader(ds, batch_size=args.overfit_batch, shuffle=True, num_workers=0)
         batch_imgs, batch_targets = next(iter(loader_tmp))
-        print("batch_imgs.shape:", batch_imgs.shape)   # expect [B,3,H,W]
+        print("batch_imgs.shape:", batch_imgs.shape)  
         print("batch_targets.shape:", batch_targets.shape)
         print("unique labels in batch:", batch_targets.unique().tolist())
         print("batch_targets:", batch_targets.tolist())
 
         batch_imgs, batch_targets = next(iter(loader_tmp))
-        # make tiny dataset whose __len__ is 1 but DataLoader returns our batch repeatedly
+
         class SingleBatchDataset(Dataset):
             def __len__(self):
                 return 1
@@ -240,22 +226,19 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=cfg.get('lr', 1e-3), weight_decay=cfg.get('weight_decay',1e-6))
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=cfg.get('lr_step',10), gamma=cfg.get('lr_gamma',0.1))
 
-    # --------------------------------------------------
-    # 🔹 PATCH: Overfit (sanity check) mode adjustments
-    # --------------------------------------------------
+    #dobranie specjalnych parametrów do sanity check
     if args.overfit_batch > 0:
         print(">>> Overfit mode detected: applying overfit-friendly hyperparams")
         for g in optimizer.param_groups:
-            g['weight_decay'] = 0.0       # no regularization
-            g['lr'] = 1e-2                # stronger learning rate
+            g['weight_decay'] = 0.0       #bez regularyzacji
+            g['lr'] = 1e-2                # lepszy  lr
         for m in model.modules():
             if isinstance(m, torch.nn.Dropout):
-                m.p = 0.0                 # disable dropout
-        scheduler = None                  # disable LR scheduler
-        epochs = 200                      # train longer
-    # --------------------------------------------------
+                m.p = 0.0                 # bez dropoutu
+        scheduler = None                  
+        epochs = 200                      #dużo epok
 
-    # CSV logger
+    #zapisywanie
     csv_logger = CSVLogger(str(workdir / 'train_log.csv'),
                            ['epoch','train_loss','train_acc','val_loss','val_acc','lr','time'])
 
@@ -264,7 +247,7 @@ def main():
 
     # jeśli nie overfit, to bierz z config.yaml, inaczej z patcha
     if args.overfit_batch > 0:
-        epochs = 200   # sanity test — dłuższy, żeby dobrze zapamiętać batch
+        epochs = 200   # sanity test-dłuższy, żeby dobrze zapamiętać batch
     else:
         epochs = cfg.get('epochs', 30)
 
@@ -274,14 +257,12 @@ def main():
         lr = optimizer.param_groups[0]['lr']
         epoch_time = time.time() - start_time
 
-        # tensorboard scalars
         tb_writer.add_scalar('loss/train', train_loss, epoch)
         tb_writer.add_scalar('loss/val', val_loss, epoch)
         tb_writer.add_scalar('acc/train', train_acc, epoch)
         tb_writer.add_scalar('acc/val', val_acc, epoch)
         tb_writer.add_scalar('lr', lr, epoch)
 
-        # CSV log
         csv_logger.log({
             'epoch': epoch,
             'train_loss': train_loss,
@@ -292,7 +273,7 @@ def main():
             'time': epoch_time
         })
 
-        # checkpointing periodic
+        # mechanizm checkpointowy
         if epoch % cfg.get('save_every', 5) == 0 or val_loss < best_val_loss:
             ckpt = {
                 'epoch': epoch,
@@ -305,7 +286,7 @@ def main():
             torch.save(ckpt, ckpt_name)
             print(f"Saved checkpoint {ckpt_name}")
 
-        # save best
+        # szukamy najlepszego checka
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_name = workdir / 'checkpoints' / 'best.pth'
@@ -317,7 +298,7 @@ def main():
 
     csv_logger.close()
     tb_writer.close()
-    # final save config + summary
+    #na koniec krotkie podsumowanie
     summary = {
         'final_epoch': epoch,
         'best_val_loss': best_val_loss,
@@ -325,16 +306,14 @@ def main():
     }
     save_json(summary, workdir / 'summary.json')
 
-    # Plotting training curves
+    # ploty
     plot_dir = workdir / 'plots'
     plot_training_curves(str(workdir / 'train_log.csv'), str(plot_dir))
 
     print("Training finished. Summary saved to", workdir / 'summary.json')
 
 def plot_training_curves(csv_path, save_dir):
-    """
-    Reads the training CSV log and plots loss/accuracy curves.
-    """
+
     os.makedirs(save_dir, exist_ok=True)
     df = pd.read_csv(csv_path)
     
