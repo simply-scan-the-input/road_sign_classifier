@@ -1,0 +1,18 @@
+{
+  "data_root": "./data",
+  "img_size": 64,
+  "batch_size": 64,
+  "lr": 0.003633534722941957,
+  "weight_decay": 3.7785732030838055e-06,
+  "epochs": 30,
+  "lr_step": 15,
+  "lr_gamma": 0.5,
+  "save_every": 5,
+  "_cli": {
+    "config": "model/config.yaml",
+    "workdir": "./workdir/train_best",
+    "overfit_batch": 0,
+    "device": "cuda",
+    "num_classes": 43
+  }
+}
