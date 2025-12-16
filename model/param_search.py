@@ -72,7 +72,7 @@ def eval_one_epoch(model, loader, criterion, device):
 def get_loaders(data_root: Path, batch_size: int, img_size: int):
     train_tf = transforms.Compose([
         transforms.Resize((img_size, img_size)),
-        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),    # augumentation
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
     ])
