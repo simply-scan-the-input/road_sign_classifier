@@ -140,7 +140,7 @@ def main():
         print(f"Błąd ładowania modelu: {e}")
         sys.exit(1)
 
-    print(f"🔍 Analiza obrazu: {args.image}...")
+    print(f"Analiza obrazu: {args.image}...")
     
     # 2. Predykcja
     class_id, confidence = predict_image(model, args.image, device)
@@ -159,3 +159,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
