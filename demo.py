@@ -85,7 +85,7 @@ class SimpleTrafficCNN(nn.Module):
 def predict_image(model, image_path, device, img_size=64):
     # 1. Wczytanie obrazu
     if not os.path.exists(image_path):
-        print(f"❌ Błąd: Nie znaleziono pliku: {image_path}")
+        print(f"Błąd: Nie znaleziono pliku: {image_path}")
         sys.exit(1)
         
     image = Image.open(image_path).convert('RGB')
@@ -122,7 +122,7 @@ def main():
     device = torch.device(args.device)
 
     print("\n" + "="*40)
-    print("🚦 Ładowanie DEMO...")
+    print("Ładowanie DEMO...")
     print("="*40)
 
     # 1. Ładowanie modelu
@@ -135,9 +135,9 @@ def main():
         model = SimpleTrafficCNN(num_classes=43, dropout_rate=dropout_val)
         model.load_state_dict(checkpoint["model_state"])
         model = model.to(device)
-        print(f"✅ Model załadowany pomyślnie z: {args.ckpt}")
+        print(f"Model załadowany pomyślnie z: {args.ckpt}")
     except Exception as e:
-        print(f"❌ Błąd ładowania modelu: {e}")
+        print(f"Błąd ładowania modelu: {e}")
         sys.exit(1)
 
     print(f"🔍 Analiza obrazu: {args.image}...")
@@ -149,12 +149,13 @@ def main():
     class_name = GTSRB_CLASSES.get(class_id, "Nieznany znak")
     
     print("\n" + "="*40)
-    print("🧠 WYNIK PREDYKCJI MODELU")
+    print("WYNIK PREDYKCJI MODELU")
     print("="*40)
-    print(f"➡️  ID Klasy:   {class_id}")
-    print(f"🛑  Nazwa Znaku: \033[1m{class_name}\033[0m") # \033[1m to pogrubienie w terminalu
-    print(f"🎯  Pewność:     {confidence*100:.2f}%")
+    print(f" ID Klasy:   {class_id}")
+    print(f" Nazwa Znaku: \033[1m{class_name}\033[0m") # \033[1m to pogrubienie w terminalu
+    print(f" Pewność:     {confidence*100:.2f}%")
     print("="*40 + "\n")
 
 if __name__ == "__main__":
+
     main()
