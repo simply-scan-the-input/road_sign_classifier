@@ -57,7 +57,7 @@ GTSRB_CLASSES = {
 }
 
 # ==========================================
-# 2. MODEL DEFINITION (Musi pasować do reszty projektu)
+# 2. MODEL DEFINITION 
 # ==========================================
 class SimpleTrafficCNN(nn.Module):
     def __init__(self, num_classes=43, dropout_rate=0.5):
@@ -159,4 +159,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
